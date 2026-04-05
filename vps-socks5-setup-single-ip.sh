@@ -118,20 +118,88 @@ vm.min_free_kbytes = 65536
 SYSCTL
 sysctl -p /etc/sysctl.d/99-game-proxy.conf >/dev/null 2>&1 || true
 
+install_3proxy_from_source() {
+    echo "  仓库里没有 3proxy，改为从 GitHub 源码编译到 /usr/local/bin/3proxy …"
+    if ! command -v gcc >/dev/null 2>&1 || ! command -v make >/dev/null 2>&1 || ! command -v git >/dev/null 2>&1; then
+        if command -v apt-get >/dev/null 2>&1; then
+            export DEBIAN_FRONTEND=noninteractive
+            apt-get update -qq || true
+            apt-get install -y build-essential git ca-certificates
+        elif command -v dnf >/dev/null 2>&1; then
+            dnf install -y gcc make git ca-certificates
+        elif command -v yum >/dev/null 2>&1; then
+            yum install -y gcc make git ca-certificates
+        elif command -v apk >/dev/null 2>&1; then
+            apk add --no-cache gcc make musl-dev git
+        else
+            echo "错误: 无法自动安装编译依赖（gcc/make/git），请手动装好后再运行本脚本。"
+            return 1
+        fi
+    fi
+    local tmp
+    tmp=$(mktemp -d)
+    if ! git clone --depth 1 https://github.com/z3apa3a/3proxy.git "$tmp/3p"; then
+        rm -rf "$tmp"
+        return 1
+    fi
+    if ! (cd "$tmp/3p" && make -f Makefile.Linux); then
+        echo "错误: 3proxy 编译失败，请把终端完整输出发给维护者或手动编译。"
+        rm -rf "$tmp"
+        return 1
+    fi
+    if [ ! -f "$tmp/3p/bin/3proxy" ]; then
+        echo "错误: 编译结束但未生成 bin/3proxy。"
+        rm -rf "$tmp"
+        return 1
+    fi
+    install -m 755 "$tmp/3p/bin/3proxy" /usr/local/bin/3proxy
+    rm -rf "$tmp"
+}
+
 echo "[3/5] 安装 3proxy"
+if ! command -v 3proxy >/dev/null 2>&1; then
+    if command -v dnf >/dev/null 2>&1; then
+        dnf install -y epel-release >/dev/null 2>&1 || true
+        dnf install -y 3proxy >/dev/null 2>&1 || true
+    fi
+fi
 if ! command -v 3proxy >/dev/null 2>&1; then
     if command -v yum >/dev/null 2>&1; then
         yum install -y epel-release >/dev/null 2>&1 || true
         yum install -y 3proxy >/dev/null 2>&1 || true
-    elif command -v apt-get >/dev/null 2>&1; then
-        apt-get update >/dev/null 2>&1 || true
+    fi
+fi
+if ! command -v 3proxy >/dev/null 2>&1; then
+    if command -v apt-get >/dev/null 2>&1; then
+        export DEBIAN_FRONTEND=noninteractive
+        apt-get update -qq || true
         apt-get install -y 3proxy >/dev/null 2>&1 || true
     fi
 fi
 if ! command -v 3proxy >/dev/null 2>&1; then
-    echo "错误: 未能安装 3proxy，请手工安装后重试。"
+    if command -v apk >/dev/null 2>&1; then
+        apk add --no-cache 3proxy >/dev/null 2>&1 || true
+    fi
+fi
+if ! command -v 3proxy >/dev/null 2>&1; then
+    install_3proxy_from_source || {
+        echo "错误: 未能安装或编译 3proxy。若系统极简，请执行: apt install build-essential git 或 yum install gcc make git 后重试。"
+        exit 1
+    }
+fi
+
+THREE_PROXY_BIN=""
+for p in /usr/local/bin/3proxy /usr/bin/3proxy /usr/sbin/3proxy; do
+    if [ -x "$p" ]; then
+        THREE_PROXY_BIN="$p"
+        break
+    fi
+done
+if [ -z "$THREE_PROXY_BIN" ]; then
+    echo "错误: 未找到可执行的 3proxy。"
     exit 1
 fi
+echo "  使用 3proxy: $THREE_PROXY_BIN"
 
 echo "[4/5] 生成 3proxy 配置（仅 SOCKS5，网页建议客户端用 socks5h）"
 cat > /etc/3proxy.cfg << EOF
@@ -148,7 +216,7 @@ EOF
 
 chmod 600 /etc/3proxy.cfg
 
-cat > /etc/systemd/system/3proxy.service << 'EOF'
+cat > /etc/systemd/system/3proxy.service << EOF
 [Unit]
 Description=3proxy Proxy Server
 After=network-online.target
@@ -156,7 +224,7 @@ Wants=network-online.target
 
 [Service]
 Type=forking
-ExecStart=/usr/bin/3proxy /etc/3proxy.cfg
+ExecStart=${THREE_PROXY_BIN} /etc/3proxy.cfg
 ExecStop=/usr/bin/pkill 3proxy
 Restart=always
 RestartSec=2
@@ -164,10 +232,6 @@ RestartSec=2
 [Install]
 WantedBy=multi-user.target
 EOF
-
-if [ ! -x /usr/bin/3proxy ] && [ -x /usr/sbin/3proxy ]; then
-    sed -i 's#/usr/bin/3proxy#/usr/sbin/3proxy#g' /etc/systemd/system/3proxy.service
-fi
 
 systemctl daemon-reload
 systemctl enable 3proxy >/dev/null 2>&1 || true
