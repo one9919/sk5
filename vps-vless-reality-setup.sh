@@ -79,14 +79,14 @@ gen_short_id() {
 
 install_xray
 
-# Xray v25+ 输出格式: PrivateKey / Password(即公钥) / Hash32
-# 旧版格式: Private key / Public key
+# Xray 密钥输出格式（随版本变化）:
+#   旧版: Private key / Public key
+#   v25+: PrivateKey / Password
+#   v26+: PrivateKey / Password (PublicKey) / Hash32
 parse_x25519_keys() {
     local output="$1"
-    PRIVATE_KEY=$(echo "$output" | awk -F': *' '/^PrivateKey:/ {print $2; exit} /^Private key:/ {print $2; exit}')
-    PUBLIC_KEY=$(echo "$output" | awk -F': *' '/^Password:/ {print $2; exit} /^Public key:/ {print $2; exit}')
-    PRIVATE_KEY=$(echo "$PRIVATE_KEY" | tr -d '[:space:]')
-    PUBLIC_KEY=$(echo "$PUBLIC_KEY" | tr -d '[:space:]')
+    PRIVATE_KEY=$(echo "$output" | grep -E '^PrivateKey:|^Private key:' | head -1 | sed 's/^[^:]*:[[:space:]]*//' | tr -d '[:space:]')
+    PUBLIC_KEY=$(echo "$output" | grep -E '^Password|^Public key:' | head -1 | sed 's/^[^:]*:[[:space:]]*//' | tr -d '[:space:]')
 }
 
 info "生成 Reality 密钥对..."
