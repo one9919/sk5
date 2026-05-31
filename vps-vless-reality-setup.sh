@@ -79,11 +79,24 @@ gen_short_id() {
 
 install_xray
 
+# Xray v25+ 输出格式: PrivateKey / Password(即公钥) / Hash32
+# 旧版格式: Private key / Public key
+parse_x25519_keys() {
+    local output="$1"
+    PRIVATE_KEY=$(echo "$output" | awk -F': *' '/^PrivateKey:/ {print $2; exit} /^Private key:/ {print $2; exit}')
+    PUBLIC_KEY=$(echo "$output" | awk -F': *' '/^Password:/ {print $2; exit} /^Public key:/ {print $2; exit}')
+    PRIVATE_KEY=$(echo "$PRIVATE_KEY" | tr -d '[:space:]')
+    PUBLIC_KEY=$(echo "$PUBLIC_KEY" | tr -d '[:space:]')
+}
+
 info "生成 Reality 密钥对..."
-KEYS=$("$XRAY_BIN" x25519)
-PRIVATE_KEY=$(echo "$KEYS" | awk '/Private key:/ {print $3}')
-PUBLIC_KEY=$(echo "$KEYS" | awk '/Public key:/ {print $3}')
-[ -n "$PRIVATE_KEY" ] && [ -n "$PUBLIC_KEY" ] || error "密钥生成失败"
+KEYS=$("$XRAY_BIN" x25519 2>&1) || error "xray x25519 执行失败: $KEYS"
+parse_x25519_keys "$KEYS"
+if [ -z "$PRIVATE_KEY" ] || [ -z "$PUBLIC_KEY" ]; then
+    echo "$KEYS"
+    error "密钥解析失败（Xray 输出格式可能已变更，请把上面内容发给我）"
+fi
+info "PrivateKey: ${PRIVATE_KEY:0:8}...  PublicKey: ${PUBLIC_KEY:0:8}..."
 
 UUIDS=()
 SHORT_IDS=()
